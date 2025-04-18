@@ -36,6 +36,8 @@ document.addEventListener('DOMContentLoaded', function() {
             websiteFrame.src = url;
             capturedLogs = [];
             consoleLogs.textContent = 'Loading website...';
+            capturedLogs.push(`[${new Date().toISOString()}] [INFO] Loading website in iframe: ${url}`);
+            updateConsoleLogs();
             
             // Set up message listener for communication with the iframe
             window.addEventListener('message', receiveMessage, false);
@@ -43,8 +45,10 @@ document.addEventListener('DOMContentLoaded', function() {
             // Try to inject console logger when the iframe loads
             websiteFrame.onload = function() {
                 capturedLogs.push(`[${new Date().toISOString()}] [INFO] Website loaded in iframe`);
-                injectConsoleLogger();
-                injectConsoleLoggerViaProxy(url);
+                updateConsoleLogs();
+                
+                // Create a console logger proxy
+                createConsoleLoggerProxy(url);
             };
         }
     });
@@ -207,146 +211,200 @@ document.addEventListener('DOMContentLoaded', function() {
             return null;
         }
     }
-    
-    // Inject console logger into iframe (Direct method - may fail with cross-origin)
-    function injectConsoleLogger() {
-        try {
-            const iframeWindow = websiteFrame.contentWindow;
-            
-            // Create script to inject
-            const script = document.createElement('script');
-            script.textContent = getConsoleLoggerScript();
-            
-            if (iframeWindow.document.body) {
-                iframeWindow.document.body.appendChild(script);
-                capturedLogs.push(`[${new Date().toISOString()}] [INFO] Console logger directly injected`);
-                updateConsoleLogs();
-            } else {
-                capturedLogs.push(`[${new Date().toISOString()}] [WARN] Could not inject console logger: no body element found`);
-                updateConsoleLogs();
-            }
-        } catch (error) {
-            capturedLogs.push(`[${new Date().toISOString()}] [ERROR] Direct console logger injection failed: ${error.message}`);
-            updateConsoleLogs();
-        }
-    }
-    
-    // Try to inject console logger using proxies
-    async function injectConsoleLoggerViaProxy(url) {
-        capturedLogs.push(`[${new Date().toISOString()}] [INFO] Attempting to inject console logger via proxy...`);
+
+    // Create a console logger proxy iframe that can intercept logs
+    async function createConsoleLoggerProxy(url) {
+        capturedLogs.push(`[${new Date().toISOString()}] [INFO] Setting up console logger proxy...`);
         updateConsoleLogs();
         
-        // Try each proxy in sequence
+        // Try each proxy in sequence for fetching content
         for (let i = 0; i < corsProxies.length; i++) {
             const proxy = corsProxies[i];
             try {
-                // Create a hidden iframe for the proxy
-                const proxyFrame = document.createElement('iframe');
-                proxyFrame.style.display = 'none';
-                document.body.appendChild(proxyFrame);
+                capturedLogs.push(`[${new Date().toISOString()}] [INFO] Trying to fetch content via ${proxy.name}...`);
+                updateConsoleLogs();
                 
-                // Set the src to the proxied URL
-                proxyFrame.src = proxy.url + url;
+                // Fetch the content via proxy
+                const response = await fetch(proxy.url + url);
+                if (!response.ok) throw new Error(`Proxy returned ${response.status}`);
                 
-                // Wait for the iframe to load
-                await new Promise((resolve, reject) => {
-                    proxyFrame.onload = resolve;
-                    proxyFrame.onerror = reject;
-                    // Timeout after 5 seconds
-                    setTimeout(reject, 5000);
-                });
+                const html = await response.text();
                 
-                // Try to inject the console logger
-                try {
-                    const script = document.createElement('script');
-                    script.textContent = getConsoleLoggerScript();
-                    proxyFrame.contentWindow.document.body.appendChild(script);
-                    capturedLogs.push(`[${new Date().toISOString()}] [INFO] Console logger injected via ${proxy.name} proxy`);
-                    updateConsoleLogs();
-                    return;
-                } catch (injectError) {
-                    document.body.removeChild(proxyFrame);
-                    throw injectError;
-                }
+                // Create a hidden iframe with srcdoc to have control over the environment
+                const loggerFrame = document.createElement('iframe');
+                loggerFrame.style.display = 'none';
+                loggerFrame.sandbox = 'allow-same-origin allow-scripts';
+                document.body.appendChild(loggerFrame);
+                
+                // Create content for the srcdoc with our console logger injected
+                const loggerFrameContent = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Console Logger Proxy</title>
+                    <script>
+                    // Setup message channel to parent
+                    function sendLogToParent(type, message) {
+                        window.parent.postMessage({
+                            type: 'console-log',
+                            data: {
+                                type: type,
+                                message: message,
+                                timestamp: new Date().toISOString()
+                            }
+                        }, '*');
+                    }
+                    
+                    // Override console methods
+                    const originalConsole = {
+                        log: console.log,
+                        warn: console.warn,
+                        error: console.error,
+                        info: console.info
+                    };
+                    
+                    console.log = function() {
+                        const message = Array.from(arguments).map(a => String(a)).join(' ');
+                        sendLogToParent('log', message);
+                        return originalConsole.log.apply(console, arguments);
+                    };
+                    
+                    console.warn = function() {
+                        const message = Array.from(arguments).map(a => String(a)).join(' ');
+                        sendLogToParent('warn', message);
+                        return originalConsole.warn.apply(console, arguments);
+                    };
+                    
+                    console.error = function() {
+                        const message = Array.from(arguments).map(a => String(a)).join(' ');
+                        sendLogToParent('error', message);
+                        return originalConsole.error.apply(console, arguments);
+                    };
+                    
+                    console.info = function() {
+                        const message = Array.from(arguments).map(a => String(a)).join(' ');
+                        sendLogToParent('info', message);
+                        return originalConsole.info.apply(console, arguments);
+                    };
+                    
+                    // Catch unhandled errors
+                    window.addEventListener('error', function(event) {
+                        sendLogToParent('error', 'UNHANDLED ERROR: ' + event.message + ' at ' + (event.filename || 'unknown') + ':' + (event.lineno || '?'));
+                        event.preventDefault();
+                    });
+                    
+                    // Notify that logger is ready
+                    sendLogToParent('info', 'Console logger proxy initialized');
+                    
+                    // Load and execute the target page with console logging enabled
+                    function loadContent() {
+                        try {
+                            // Get HTML content
+                            const content = ${JSON.stringify(html)};
+                            
+                            // Create container to simulate the page environment
+                            const container = document.createElement('div');
+                            container.innerHTML = content;
+                            
+                            // Extract and execute scripts
+                            const scripts = container.querySelectorAll('script');
+                            scripts.forEach(script => {
+                                try {
+                                    if (script.src) {
+                                        console.log('External script found:', script.src);
+                                    } else if (script.textContent) {
+                                        // Execute inline scripts in a try-catch
+                                        try {
+                                            console.log('Executing inline script...');
+                                            eval(script.textContent);
+                                        } catch (scriptError) {
+                                            console.error('Error in script execution:', scriptError.message);
+                                        }
+                                    }
+                                } catch (scriptExtractError) {
+                                    console.error('Error processing script:', scriptExtractError.message);
+                                }
+                            });
+                            
+                            console.log('Content loaded and scripts processed');
+                        } catch (contentError) {
+                            console.error('Error loading content:', contentError.message);
+                        }
+                    }
+                    
+                    // Execute after the logger is ready
+                    setTimeout(loadContent, 100);
+                    </script>
+                </head>
+                <body>
+                    <div id="console-logger-proxy">Console Logger Proxy</div>
+                </body>
+                </html>`;
+                
+                // Set the content and add to document
+                loggerFrame.srcdoc = loggerFrameContent;
+                
+                capturedLogs.push(`[${new Date().toISOString()}] [INFO] Console logger proxy created via ${proxy.name}`);
+                updateConsoleLogs();
+                
+                // Also attempt to monitor network activity
+                setupNetworkMonitoring(url);
+                
+                return;
             } catch (error) {
                 capturedLogs.push(`[${new Date().toISOString()}] [WARN] Proxy ${proxy.name} failed: ${error.message}`);
                 updateConsoleLogs();
-                // Continue to the next proxy
             }
         }
         
-        capturedLogs.push(`[${new Date().toISOString()}] [WARN] All proxy console logger injections failed. Falling back to global error monitoring.`);
+        capturedLogs.push(`[${new Date().toISOString()}] [WARN] All console logger proxy attempts failed. Limited log capture available.`);
+        updateConsoleLogs();
+        
+        // Fallback to global error monitoring
+        capturedLogs.push(`[${new Date().toISOString()}] [INFO] Falling back to global error monitoring only.`);
         updateConsoleLogs();
     }
     
-    // Helper to get the console logger script content
-    function getConsoleLoggerScript() {
-        return `
-            (function() {
-                const originalConsole = {
-                    log: console.log,
-                    warn: console.warn,
-                    error: console.error,
-                    info: console.info
-                };
+    // Additional monitoring for network issues
+    function setupNetworkMonitoring(url) {
+        capturedLogs.push(`[${new Date().toISOString()}] [INFO] Setting up network monitoring...`);
+        updateConsoleLogs();
+        
+        // Create an img tag to test if the site responds
+        const testImg = new Image();
+        testImg.onload = function() {
+            capturedLogs.push(`[${new Date().toISOString()}] [INFO] Network test: site responds to image requests`);
+            updateConsoleLogs();
+        };
+        testImg.onerror = function() {
+            capturedLogs.push(`[${new Date().toISOString()}] [WARN] Network test: site blocks image requests or has no favicon`);
+            updateConsoleLogs();
+        };
+        
+        // Try to load the favicon or a small image from the site
+        const faviconUrl = new URL('/favicon.ico', url).href;
+        testImg.src = faviconUrl;
+        
+        // Try fetch with different modes
+        checkFetchModes(url);
+    }
+    
+    // Test fetch with different modes
+    async function checkFetchModes(url) {
+        const modes = ['cors', 'no-cors'];
+        for (const mode of modes) {
+            try {
+                capturedLogs.push(`[${new Date().toISOString()}] [INFO] Testing fetch with mode: ${mode}`);
+                updateConsoleLogs();
                 
-                function captureLog(type, args) {
-                    const logData = {
-                        type: type,
-                        message: Array.from(args).map(arg => {
-                            try {
-                                return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
-                            } catch (e) {
-                                return String(arg);
-                            }
-                        }).join(' '),
-                        timestamp: new Date().toISOString()
-                    };
-                    
-                    window.parent.postMessage({
-                        type: 'console-log',
-                        data: logData
-                    }, '*');
-                    
-                    return args;
-                }
-                
-                console.log = function() {
-                    const args = captureLog('log', arguments);
-                    return originalConsole.log.apply(console, args);
-                };
-                
-                console.warn = function() {
-                    const args = captureLog('warn', arguments);
-                    return originalConsole.warn.apply(console, args);
-                };
-                
-                console.error = function() {
-                    const args = captureLog('error', arguments);
-                    return originalConsole.error.apply(console, args);
-                };
-                
-                console.info = function() {
-                    const args = captureLog('info', arguments);
-                    return originalConsole.info.apply(console, args);
-                };
-                
-                // Also capture unhandled errors
-                window.addEventListener('error', function(event) {
-                    captureLog('error', ['UNHANDLED ERROR: ' + event.message + ' at ' + event.filename + ':' + event.lineno]);
-                });
-                
-                // Notify that the logger is installed
-                window.parent.postMessage({
-                    type: 'console-log',
-                    data: {
-                        type: 'info',
-                        message: 'Console logger successfully injected',
-                        timestamp: new Date().toISOString()
-                    }
-                }, '*');
-            })();
-        `;
+                const response = await fetch(url, { mode: mode });
+                capturedLogs.push(`[${new Date().toISOString()}] [INFO] Fetch ${mode} succeeded with status: ${response.status}`);
+                updateConsoleLogs();
+            } catch (error) {
+                capturedLogs.push(`[${new Date().toISOString()}] [WARN] Fetch ${mode} failed: ${error.message}`);
+                updateConsoleLogs();
+            }
+        }
     }
     
     // Helper to update console logs display
