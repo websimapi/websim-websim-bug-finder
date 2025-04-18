@@ -1,0 +1,118 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    height: 100vh;
+    overflow: hidden;
+}
+
+.container {
+    display: flex;
+    height: 100vh;
+}
+
+.sidebar {
+    width: 350px;
+    background-color: #f5f5f5;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    border-right: 1px solid #ddd;
+}
+
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.iframe-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+h1 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    color: #444;
+}
+
+h2 {
+    font-size: 1.2rem;
+    margin: 1rem 0 0.5rem;
+    color: #555;
+}
+
+.controls {
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+input, button {
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+input {
+    border: 1px solid #ddd;
+}
+
+button {
+    background-color: #4a90e2;
+    color: white;
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+button:hover {
+    background-color: #3a7bc8;
+}
+
+.results-container, .extracted-code-container, .console-logs-container {
+    margin-top: 1rem;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 150px;
+}
+
+.results, .code-display, .logs-display {
+    background-color: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 0.75rem;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 0.9rem;
+    height: 200px;
+}
+
+.results {
+    color: #333;
+}
+
+.code-display {
+    color: #333;
+}
+
+.logs-display {
+    color: #d44;
+}
+

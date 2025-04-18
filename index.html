@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Websim Bug Finder</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>Websim Bug Finder</h1>
+            <div class="controls">
+                <input type="text" id="websiteUrl" value="https://websim.ai" placeholder="Enter URL">
+                <button id="loadButton">Load Website</button>
+                <button id="extractButton">Extract Code</button>
+                <button id="analyzeButton">Analyze Code</button>
+                <button id="analyzeLogs">Analyze Console Logs</button>
+            </div>
+            <div class="results-container">
+                <h2>Analysis Results</h2>
+                <div id="analysisResults" class="results"></div>
+            </div>
+            <div class="extracted-code-container">
+                <h2>Extracted Code</h2>
+                <div id="extractedCode" class="code-display"></div>
+            </div>
+            <div class="console-logs-container">
+                <h2>Console Logs</h2>
+                <div id="consoleLogs" class="logs-display"></div>
+            </div>
+        </div>
+        <div class="main-content">
+            <div class="iframe-container">
+                <iframe id="websiteFrame" src="about:blank"></iframe>
+            </div>
+        </div>
+    </div>
+    <script src="script.js"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v8c78df7c7c0f484497ecbca7046644da1771523124516" integrity="sha512-8DS7rgIrAmghBFwoOTujcf6D9rXvH8xm8JQ1Ja01h9QX8EzXldiszufYa4IFfKdLUKTTrnSFXLDkUEOTrZQ8Qg==" data-cf-beacon='{"version":"2024.11.0","token":"4c6229722a6346bc8eb5cb0e5eae5d41","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
+
