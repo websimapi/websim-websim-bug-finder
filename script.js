@@ -13,6 +13,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Store logs
     let capturedLogs = [];
     
+    // Define CORS proxies to try
+    const corsProxies = [
+        {name: "CORS Anywhere", url: "https://cors-anywhere.herokuapp.com/"},
+        {name: "AllOrigins", url: "https://api.allorigins.win/raw?url="},
+        {name: "corsproxy.io", url: "https://corsproxy.io/?"},
+        {name: "CORS.sh", url: "https://cors.sh/"},
+        {name: "thingproxy", url: "https://thingproxy.freeboard.io/fetch/"}
+    ];
+    
     // Load website into iframe
     loadButton.addEventListener('click', function() {
         const url = websiteUrlInput.value.trim();
@@ -34,7 +43,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Extract code from iframe
     extractButton.addEventListener('click', function() {
         try {
-            extractCodeFromIframe();
+            const url = websiteUrlInput.value.trim();
+            if (url) {
+                extractedCode.textContent = 'Attempting to extract code...';
+                extractCodeUsingCorsProxies(url);
+            } else {
+                extractedCode.textContent = 'Please enter a URL first.';
+            }
         } catch (error) {
             extractedCode.textContent = `Error extracting code: ${error.message}`;
         }
@@ -43,7 +58,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Analyze extracted code
     analyzeButton.addEventListener('click', async function() {
         const code = extractedCode.textContent;
-        if (code && code !== 'No code extracted yet.') {
+        if (code && code !== 'No code extracted yet.' && !code.startsWith('Extracting code...') && !code.startsWith('Error:')) {
             analysisResults.textContent = 'Analyzing code...';
             try {
                 const analysis = await analyzeWithLLM(code, 'code');
@@ -72,7 +87,119 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Function to extract code from iframe
+    // Function to try multiple CORS proxies until one works
+    async function extractCodeUsingCorsProxies(url) {
+        extractedCode.textContent = 'Trying to extract code using CORS proxies...';
+        
+        // First try direct iframe extraction
+        try {
+            const result = directIframeExtraction();
+            if (result) {
+                extractedCode.textContent = result;
+                return;
+            }
+        } catch (error) {
+            console.log("Direct iframe extraction failed, trying proxies...", error);
+        }
+        
+        // Try each proxy in sequence
+        for (let i = 0; i < corsProxies.length; i++) {
+            const proxy = corsProxies[i];
+            extractedCode.textContent = `Trying proxy ${i+1}/${corsProxies.length}: ${proxy.name}...`;
+            
+            try {
+                const response = await fetch(proxy.url + url);
+                if (!response.ok) throw new Error(`Proxy returned ${response.status}`);
+                
+                const html = await response.text();
+                
+                // Process the HTML
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html, 'text/html');
+                
+                // Get HTML
+                const processedHtml = doc.documentElement.outerHTML;
+                
+                // Get JS scripts
+                const scripts = Array.from(doc.querySelectorAll('script'))
+                    .map(script => script.innerHTML)
+                    .filter(content => content.trim() !== '');
+                
+                // Get CSS styles
+                const styles = Array.from(doc.querySelectorAll('style'))
+                    .map(style => style.innerHTML)
+                    .filter(content => content.trim() !== '');
+                
+                // Combine all code
+                let allCode = `<!--- HTML (via ${proxy.name} proxy) --->\n` + processedHtml + '\n\n';
+                
+                if (scripts.length > 0) {
+                    allCode += '<!--- JavaScript --->\n' + scripts.join('\n\n') + '\n\n';
+                }
+                
+                if (styles.length > 0) {
+                    allCode += '<!--- CSS --->\n' + styles.join('\n\n');
+                }
+                
+                // Also try to get external CSS files
+                const cssLinks = Array.from(doc.querySelectorAll('link[rel="stylesheet"]'))
+                    .map(link => link.getAttribute('href'))
+                    .filter(href => href);
+                
+                if (cssLinks.length > 0) {
+                    allCode += '\n\n<!--- External CSS files --->\n';
+                    allCode += cssLinks.join('\n');
+                }
+                
+                extractedCode.textContent = allCode;
+                return; // Success, exit the function
+            } catch (error) {
+                console.log(`Proxy ${proxy.name} failed:`, error);
+                // Continue to the next proxy
+            }
+        }
+        
+        // If all proxies failed
+        extractedCode.textContent = 'Error: All CORS proxies failed. Unable to extract code. Consider manually inspecting the page in browser developer tools.';
+    }
+    
+    // Function to try direct iframe extraction
+    function directIframeExtraction() {
+        try {
+            const iframeDocument = websiteFrame.contentDocument || websiteFrame.contentWindow.document;
+            
+            // Get HTML
+            const html = iframeDocument.documentElement.outerHTML;
+            
+            // Get JS scripts
+            const scripts = Array.from(iframeDocument.querySelectorAll('script'))
+                .map(script => script.innerHTML)
+                .filter(content => content.trim() !== '');
+            
+            // Get CSS styles
+            const styles = Array.from(iframeDocument.querySelectorAll('style'))
+                .map(style => style.innerHTML)
+                .filter(content => content.trim() !== '');
+            
+            // Combine all code
+            let allCode = '<!--- HTML (direct access) --->\n' + html + '\n\n';
+            
+            if (scripts.length > 0) {
+                allCode += '<!--- JavaScript --->\n' + scripts.join('\n\n') + '\n\n';
+            }
+            
+            if (styles.length > 0) {
+                allCode += '<!--- CSS --->\n' + styles.join('\n\n');
+            }
+            
+            return allCode;
+        } catch (error) {
+            console.log("Direct iframe extraction error:", error);
+            return null;
+        }
+    }
+    
+    // Function to extract code from iframe (legacy method, kept for reference)
     function extractCodeFromIframe() {
         extractedCode.textContent = 'Extracting code...';
         
@@ -228,4 +355,3 @@ document.addEventListener('DOMContentLoaded', function() {
     consoleLogs.textContent = 'No logs captured yet.';
     analysisResults.textContent = 'Load a website, extract code, and analyze it to see results.';
 });
-

@@ -85,6 +85,11 @@ button:hover {
     background-color: #3a7bc8;
 }
 
+button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+}
+
 .results-container, .extracted-code-container, .console-logs-container {
     margin-top: 1rem;
     flex: 1;
@@ -114,5 +119,12 @@ button:hover {
 
 .logs-display {
     color: #d44;
+}
+
+.proxy-status {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 0.25rem;
+    font-style: italic;
 }
 
