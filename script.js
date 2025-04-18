@@ -22,6 +22,13 @@ document.addEventListener('DOMContentLoaded', function() {
         {name: "thingproxy", url: "https://thingproxy.freeboard.io/fetch/"}
     ];
     
+    // Add global error handler to catch iframe errors
+    window.addEventListener('error', function(event) {
+        const errorMsg = `[${new Date().toISOString()}] [ERROR] ${event.message} (${event.filename}:${event.lineno})`;
+        capturedLogs.push(errorMsg);
+        updateConsoleLogs();
+    });
+    
     // Load website into iframe
     loadButton.addEventListener('click', function() {
         const url = websiteUrlInput.value.trim();
@@ -33,9 +40,11 @@ document.addEventListener('DOMContentLoaded', function() {
             // Set up message listener for communication with the iframe
             window.addEventListener('message', receiveMessage, false);
             
-            // Inject console logger once the iframe is loaded
+            // Try to inject console logger when the iframe loads
             websiteFrame.onload = function() {
+                capturedLogs.push(`[${new Date().toISOString()}] [INFO] Website loaded in iframe`);
                 injectConsoleLogger();
+                injectConsoleLoggerViaProxy(url);
             };
         }
     });
@@ -199,124 +208,162 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Function to extract code from iframe (legacy method, kept for reference)
-    function extractCodeFromIframe() {
-        extractedCode.textContent = 'Extracting code...';
-        
-        try {
-            const iframeDocument = websiteFrame.contentDocument || websiteFrame.contentWindow.document;
-            
-            // Get HTML
-            const html = iframeDocument.documentElement.outerHTML;
-            
-            // Get JS scripts
-            const scripts = Array.from(iframeDocument.querySelectorAll('script'))
-                .map(script => script.innerHTML)
-                .filter(content => content.trim() !== '');
-            
-            // Get CSS styles
-            const styles = Array.from(iframeDocument.querySelectorAll('style'))
-                .map(style => style.innerHTML)
-                .filter(content => content.trim() !== '');
-            
-            // Combine all code
-            let allCode = '<!--- HTML --->\n' + html + '\n\n';
-            
-            if (scripts.length > 0) {
-                allCode += '<!--- JavaScript --->\n' + scripts.join('\n\n') + '\n\n';
-            }
-            
-            if (styles.length > 0) {
-                allCode += '<!--- CSS --->\n' + styles.join('\n\n');
-            }
-            
-            extractedCode.textContent = allCode;
-        } catch (error) {
-            extractedCode.textContent = `Error: ${error.message}\n\nThis might be due to same-origin policy restrictions.`;
-        }
-    }
-    
-    // Inject console logger into iframe
+    // Inject console logger into iframe (Direct method - may fail with cross-origin)
     function injectConsoleLogger() {
         try {
             const iframeWindow = websiteFrame.contentWindow;
             
             // Create script to inject
             const script = document.createElement('script');
-            script.textContent = `
-                (function() {
-                    const originalConsole = {
-                        log: console.log,
-                        warn: console.warn,
-                        error: console.error,
-                        info: console.info
-                    };
-                    
-                    function captureLog(type, args) {
-                        const logData = {
-                            type: type,
-                            message: Array.from(args).map(arg => {
-                                try {
-                                    return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
-                                } catch (e) {
-                                    return String(arg);
-                                }
-                            }).join(' '),
-                            timestamp: new Date().toISOString()
-                        };
-                        
-                        window.parent.postMessage({
-                            type: 'console-log',
-                            data: logData
-                        }, '*');
-                        
-                        return args;
-                    }
-                    
-                    console.log = function() {
-                        const args = captureLog('log', arguments);
-                        return originalConsole.log.apply(console, args);
-                    };
-                    
-                    console.warn = function() {
-                        const args = captureLog('warn', arguments);
-                        return originalConsole.warn.apply(console, args);
-                    };
-                    
-                    console.error = function() {
-                        const args = captureLog('error', arguments);
-                        return originalConsole.error.apply(console, args);
-                    };
-                    
-                    console.info = function() {
-                        const args = captureLog('info', arguments);
-                        return originalConsole.info.apply(console, args);
-                    };
-                })();
-            `;
+            script.textContent = getConsoleLoggerScript();
             
             if (iframeWindow.document.body) {
                 iframeWindow.document.body.appendChild(script);
-                consoleLogs.textContent = 'Console logger injected. Waiting for logs...';
+                capturedLogs.push(`[${new Date().toISOString()}] [INFO] Console logger directly injected`);
+                updateConsoleLogs();
             } else {
-                consoleLogs.textContent = 'Could not inject console logger: no body element found.';
+                capturedLogs.push(`[${new Date().toISOString()}] [WARN] Could not inject console logger: no body element found`);
+                updateConsoleLogs();
             }
         } catch (error) {
-            consoleLogs.textContent = `Error injecting console logger: ${error.message}\n\nThis might be due to same-origin policy restrictions.`;
+            capturedLogs.push(`[${new Date().toISOString()}] [ERROR] Direct console logger injection failed: ${error.message}`);
+            updateConsoleLogs();
         }
+    }
+    
+    // Try to inject console logger using proxies
+    async function injectConsoleLoggerViaProxy(url) {
+        capturedLogs.push(`[${new Date().toISOString()}] [INFO] Attempting to inject console logger via proxy...`);
+        updateConsoleLogs();
+        
+        // Try each proxy in sequence
+        for (let i = 0; i < corsProxies.length; i++) {
+            const proxy = corsProxies[i];
+            try {
+                // Create a hidden iframe for the proxy
+                const proxyFrame = document.createElement('iframe');
+                proxyFrame.style.display = 'none';
+                document.body.appendChild(proxyFrame);
+                
+                // Set the src to the proxied URL
+                proxyFrame.src = proxy.url + url;
+                
+                // Wait for the iframe to load
+                await new Promise((resolve, reject) => {
+                    proxyFrame.onload = resolve;
+                    proxyFrame.onerror = reject;
+                    // Timeout after 5 seconds
+                    setTimeout(reject, 5000);
+                });
+                
+                // Try to inject the console logger
+                try {
+                    const script = document.createElement('script');
+                    script.textContent = getConsoleLoggerScript();
+                    proxyFrame.contentWindow.document.body.appendChild(script);
+                    capturedLogs.push(`[${new Date().toISOString()}] [INFO] Console logger injected via ${proxy.name} proxy`);
+                    updateConsoleLogs();
+                    return;
+                } catch (injectError) {
+                    document.body.removeChild(proxyFrame);
+                    throw injectError;
+                }
+            } catch (error) {
+                capturedLogs.push(`[${new Date().toISOString()}] [WARN] Proxy ${proxy.name} failed: ${error.message}`);
+                updateConsoleLogs();
+                // Continue to the next proxy
+            }
+        }
+        
+        capturedLogs.push(`[${new Date().toISOString()}] [WARN] All proxy console logger injections failed. Falling back to global error monitoring.`);
+        updateConsoleLogs();
+    }
+    
+    // Helper to get the console logger script content
+    function getConsoleLoggerScript() {
+        return `
+            (function() {
+                const originalConsole = {
+                    log: console.log,
+                    warn: console.warn,
+                    error: console.error,
+                    info: console.info
+                };
+                
+                function captureLog(type, args) {
+                    const logData = {
+                        type: type,
+                        message: Array.from(args).map(arg => {
+                            try {
+                                return typeof arg === 'object' ? JSON.stringify(arg) : String(arg);
+                            } catch (e) {
+                                return String(arg);
+                            }
+                        }).join(' '),
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    window.parent.postMessage({
+                        type: 'console-log',
+                        data: logData
+                    }, '*');
+                    
+                    return args;
+                }
+                
+                console.log = function() {
+                    const args = captureLog('log', arguments);
+                    return originalConsole.log.apply(console, args);
+                };
+                
+                console.warn = function() {
+                    const args = captureLog('warn', arguments);
+                    return originalConsole.warn.apply(console, args);
+                };
+                
+                console.error = function() {
+                    const args = captureLog('error', arguments);
+                    return originalConsole.error.apply(console, args);
+                };
+                
+                console.info = function() {
+                    const args = captureLog('info', arguments);
+                    return originalConsole.info.apply(console, args);
+                };
+                
+                // Also capture unhandled errors
+                window.addEventListener('error', function(event) {
+                    captureLog('error', ['UNHANDLED ERROR: ' + event.message + ' at ' + event.filename + ':' + event.lineno]);
+                });
+                
+                // Notify that the logger is installed
+                window.parent.postMessage({
+                    type: 'console-log',
+                    data: {
+                        type: 'info',
+                        message: 'Console logger successfully injected',
+                        timestamp: new Date().toISOString()
+                    }
+                }, '*');
+            })();
+        `;
+    }
+    
+    // Helper to update console logs display
+    function updateConsoleLogs() {
+        consoleLogs.textContent = capturedLogs.join('\n');
+        // Auto-scroll to bottom
+        consoleLogs.scrollTop = consoleLogs.scrollHeight;
     }
     
     // Receive messages from iframe
     function receiveMessage(event) {
-        // For security, verify origin if needed
-        // if (event.origin !== "https://websim.ai") return;
-        
         if (event.data && event.data.type === 'console-log') {
             const logData = event.data.data;
             const logText = `[${logData.timestamp}] [${logData.type.toUpperCase()}] ${logData.message}`;
             
             capturedLogs.push(logText);
-            consoleLogs.textContent = capturedLogs.join('\n');
+            updateConsoleLogs();
         }
     }
     
@@ -354,4 +401,19 @@ document.addEventListener('DOMContentLoaded', function() {
     extractedCode.textContent = 'No code extracted yet.';
     consoleLogs.textContent = 'No logs captured yet.';
     analysisResults.textContent = 'Load a website, extract code, and analyze it to see results.';
+    
+    // Setup global monitoring for iframe errors
+    const originalOnError = window.onerror;
+    window.onerror = function(message, source, lineno, colno, error) {
+        // Only log if it seems to be from the iframe
+        if (source && (source.includes(websiteUrlInput.value) || source === 'iframe')) {
+            const errorMsg = `[${new Date().toISOString()}] [ERROR] ${message} (${source}:${lineno})`;
+            capturedLogs.push(errorMsg);
+            updateConsoleLogs();
+        }
+        
+        // Call the original handler if it exists
+        if (originalOnError) return originalOnError(message, source, lineno, colno, error);
+        return false;
+    };
 });

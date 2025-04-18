@@ -119,6 +119,7 @@ button:disabled {
 
 .logs-display {
     color: #d44;
+    max-height: 250px;
 }
 
 .proxy-status {
@@ -128,3 +129,20 @@ button:disabled {
     font-style: italic;
 }
 
+.logs-display .log-entry {
+    border-bottom: 1px solid #eee;
+    padding: 3px 0;
+}
+
+.logs-display .log-error {
+    color: #d44;
+    font-weight: bold;
+}
+
+.logs-display .log-warn {
+    color: #f80;
+}
+
+.logs-display .log-info {
+    color: #48a;
+}
